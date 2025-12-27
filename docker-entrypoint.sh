@@ -12,6 +12,10 @@ TIMEOUT="${TIMEOUT_RAW:-15}"
 TLS_CERT_URL="${V2NODE_TLS_CERT_URL:-${V2NODE_CERT_URL:-}}"
 TLS_KEY_URL="${V2NODE_TLS_KEY_URL:-${V2NODE_KEY_URL:-}}"
 
+GEOIP_URL="${V2NODE_GEOIP_URL:-https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat}"
+GEOSITE_URL="${V2NODE_GEOSITE_URL:-https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat}"
+GEO_ASSET_DIR="${V2NODE_GEO_ASSET_DIR:-${XRAY_LOCATION_ASSET:-/etc/v2node}}"
+
 json_escape() {
 	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/\"/\\\"/g'
 }
@@ -92,6 +96,37 @@ maybe_download_tls_files() {
 	download_to_path "$TLS_KEY_URL" "$key_file" 0600
 }
 
+maybe_download_geo_assets() {
+	if [ "${V2NODE_SKIP_GEO_ASSETS:-}" = "1" ]; then
+		return 0
+	fi
+
+	# Ensure xray-core can find geosite.dat/geoip.dat
+	if [ -z "${XRAY_LOCATION_ASSET:-}" ]; then
+		export XRAY_LOCATION_ASSET="$GEO_ASSET_DIR"
+	fi
+
+	geoip_path="${GEO_ASSET_DIR%/}/geoip.dat"
+	geosite_path="${GEO_ASSET_DIR%/}/geosite.dat"
+
+	[ -s "$geoip_path" ] && [ -s "$geosite_path" ] && return 0
+
+	if ! command -v curl >/dev/null 2>&1; then
+		echo "v2node: curl is required for geoip/geosite download (set V2NODE_SKIP_GEO_ASSETS=1 to skip)." >&2
+		return 0
+	fi
+
+	if [ ! -s "$geoip_path" ]; then
+		echo "v2node: geoip.dat not found, downloading to ${geoip_path} ..." >&2
+		download_to_path "$GEOIP_URL" "$geoip_path" 0644 || echo "v2node: failed to download geoip.dat; geoip:* routing rules may fail." >&2
+	fi
+
+	if [ ! -s "$geosite_path" ]; then
+		echo "v2node: geosite.dat not found, downloading to ${geosite_path} ..." >&2
+		download_to_path "$GEOSITE_URL" "$geosite_path" 0644 || echo "v2node: failed to download geosite.dat; geosite:* routing rules may fail." >&2
+	fi
+}
+
 generate_config_from_env() {
 	api_host_escaped="$(json_escape "$API_HOST")"
 	api_key_escaped="$(json_escape "$API_KEY")"
@@ -156,6 +191,7 @@ fi
 if [ "$1" = "v2node" ] && [ "${2:-}" = "server" ]; then
 	ensure_config_for_server
 	maybe_download_tls_files
+	maybe_download_geo_assets
 
 	has_config_flag=0
 	for arg in "$@"; do
